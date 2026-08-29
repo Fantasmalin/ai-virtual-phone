@@ -2232,7 +2232,7 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     const [playing, setPlaying] = useState(false);
     const [synthesizing, setSynthesizing] = useState(false);
     const [synthFailed, setSynthFailed] = useState(false);
-    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const playbackAbortRef = useRef<(() => void) | null>(null);
     const mountedRef = useRef(true);
     useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
     const text = msg.mediaData?.label || "语音消息";
@@ -2243,30 +2243,27 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(speechText.length / 4));
 
     const playSrc = (src: string) => {
-        // 必须用 <audio> 元素:iOS 静音拨键会掐掉 Web Audio 的输出(表现为全线
-        // 无声),媒体元素不受影响。元素属于宿主页面,锁屏媒体卡片指向站点本身,
-        // 点了只会回到 App;播完清 src 让卡片立即撤下。
-        const audio = new Audio(src);
-        audioRef.current = audio;
-        setPlaying(true);
-        const finalize = () => {
-            if (audioRef.current === audio) audioRef.current = null;
-            try { audio.pause(); audio.removeAttribute("src"); audio.load(); } catch { /* ignore */ }
-            setPlaying(false);
-        };
-        audio.onended = finalize;
-        audio.onerror = finalize;
-        audio.play().catch(finalize);
+        // 语音消息优先走 Web Audio，避免 Android/Opera 为每个 new Audio()
+        // 建立媒体会话并在开头、结尾显示媒体条；播放失败时由服务层回退媒体元素。
+        void import("@/lib/tts-service").then(({ playAudioUrl }) => {
+            if (!mountedRef.current) return;
+            const playback = playAudioUrl(src);
+            playbackAbortRef.current = playback.abort;
+            setPlaying(true);
+            void playback.promise.finally(() => {
+                if (playbackAbortRef.current === playback.abort) playbackAbortRef.current = null;
+                if (mountedRef.current) setPlaying(false);
+            });
+        });
     };
 
     // 点击才合成（不再挂载即合成）：已有音频直接播；没有就现场合成一次，
     // 合成结果已在任务内落库，之后任何时候点都是直接播放，不再消耗额度。
     const handlePlay = () => {
         if (synthesizing) return;
-        if (playing && audioRef.current) {
-            const active = audioRef.current;
-            audioRef.current = null;
-            try { active.pause(); active.removeAttribute("src"); active.load(); } catch { /* ignore */ }
+        if (playing && playbackAbortRef.current) {
+            playbackAbortRef.current();
+            playbackAbortRef.current = null;
             setPlaying(false);
             return;
         }
@@ -2294,7 +2291,10 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
             });
     };
 
-    useEffect(() => () => { audioRef.current?.pause(); }, []);
+    useEffect(() => () => {
+        playbackAbortRef.current?.();
+        playbackAbortRef.current = null;
+    }, []);
 
     // Wave bars — slightly irregular heights so the idle state already looks intentional.
     const barCount = Math.min(Math.max(4, Math.round(duration / 2)), 9);

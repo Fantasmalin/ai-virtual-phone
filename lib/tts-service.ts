@@ -354,6 +354,51 @@ export function playAudioBlobViaMediaElement(blob: Blob): { promise: Promise<voi
     return playAudioBlobElement(blob);
 }
 
+/**
+ * Play a stored voice-message URL through the shared Web Audio path first.
+ * Chat voice messages used to create a fresh HTMLAudioElement for every click,
+ * which made Android browsers briefly show a media notification and change the
+ * audio route at the beginning/end of playback.
+ */
+export function playAudioUrl(blobUrl: string): { promise: Promise<void>; abort: () => void } {
+    let aborted = false;
+    let activeAbort: (() => void) | null = null;
+    let resolveFn: () => void = () => {};
+    const promise = new Promise<void>((resolve) => {
+        resolveFn = resolve;
+        void (async () => {
+            try {
+                const response = await fetch(blobUrl);
+                if (!response.ok) throw new Error(`audio_fetch_failed_${response.status}`);
+                const blob = await response.blob();
+                if (aborted) return;
+                const playback = playAudioBlob(blob);
+                activeAbort = playback.abort;
+                await playback.promise;
+            } catch {
+                // Keep the old URL playback as a compatibility fallback for
+                // browsers that cannot fetch/decode the stored source.
+                if (!aborted) {
+                    const fallback = playAudioBlobViaMediaElement(await fetch(blobUrl).then(response => response.blob()).catch(() => new Blob()));
+                    activeAbort = fallback.abort;
+                    await fallback.promise;
+                }
+            } finally {
+                resolveFn();
+            }
+        })();
+    });
+    return {
+        promise,
+        abort: () => {
+            if (aborted) return;
+            aborted = true;
+            activeAbort?.();
+            resolveFn();
+        },
+    };
+}
+
 function playAudioBlobElement(blob: Blob): { promise: Promise<void>; abort: () => void } {
     const url = URL.createObjectURL(blob);
     const audio = getSharedAudio();
