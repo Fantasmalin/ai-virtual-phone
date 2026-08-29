@@ -29,6 +29,7 @@ function broadcastStatus() {
 // ── 保活：Wake Lock + 静音音频 ───────────────────────────────
 let _wakeLock: WakeLockSentinel | null = null;
 let _keepAliveAudio: HTMLAudioElement | null = null;
+let _keepAliveAudioUrl: string | null = null;
 
 let _keepAliveWanted = false; // 标记：想要保活但还没获得用户手势
 let _suspendedForCall = false; // 标记：因语音/视频通话临时暂停了保活
@@ -36,33 +37,44 @@ let _suspendedForCall = false; // 标记：因语音/视频通话临时暂停了
 function ensureAudioCreated() {
     if (_keepAliveAudio) return;
     _keepAliveAudio = new Audio();
-    // 生成 1 秒静音 WAV
-    const sampleRate = 8000;
+    // 生成 1 秒、48 kHz、16 bit、立体声静音 WAV。
+    // 低采样率的循环音频可能让部分 Android WebView 进入窄带通信输出，
+    // 影响页面内其它 TTS 的音质；这里使用常见的媒体播放规格。
+    const sampleRate = 48000;
+    const channels = 2;
+    const bitsPerSample = 16;
     const samples = sampleRate;
-    const buf = new ArrayBuffer(44 + samples * 2);
+    const blockAlign = channels * bitsPerSample / 8;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = samples * blockAlign;
+    const buf = new ArrayBuffer(44 + dataSize);
     const view = new DataView(buf);
     const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
     writeStr(0, "RIFF");
-    view.setUint32(4, 36 + samples * 2, true);
+    view.setUint32(4, 36 + dataSize, true);
     writeStr(8, "WAVE");
     writeStr(12, "fmt ");
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
+    view.setUint16(22, channels, true);
     view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
     writeStr(36, "data");
-    view.setUint32(40, samples * 2, true);
+    view.setUint32(40, dataSize, true);
     // ±1 LSB 微噪声（约 -90dB，不可闻）：纯零波形会被 Chrome 判为"无声页面"，
-    // 安卓后台 5 分钟后定时器被强节流（轮询延迟拉到分钟级）；有能量的音频
-    // 可获得 "playing audio" 豁免。
+    // 安卓后台 5 分钟后定时器被强节流（轮询延迟拉到分钟级）；左右声道都
+    // 保留极低能量，以继续获得 "playing audio" 豁免。
     for (let i = 0; i < samples; i++) {
-        view.setInt16(44 + i * 2, i % 2 === 0 ? 1 : -1, true);
+        const value = i % 2 === 0 ? 1 : -1;
+        const frameOffset = 44 + i * blockAlign;
+        view.setInt16(frameOffset, value, true);
+        view.setInt16(frameOffset + 2, value, true);
     }
     const blob = new Blob([buf], { type: "audio/wav" });
-    _keepAliveAudio.src = URL.createObjectURL(blob);
+    _keepAliveAudioUrl = URL.createObjectURL(blob);
+    _keepAliveAudio.src = _keepAliveAudioUrl;
     _keepAliveAudio.loop = true;
     _keepAliveAudio.volume = 0.01;
 }
@@ -107,6 +119,15 @@ function stopKeepAlive() {
     if (_keepAliveAudio) {
         _keepAliveAudio.pause();
         _keepAliveAudio.currentTime = 0;
+        // 仅 pause() 在部分 Android WebView 中仍会保留旧的音频输出链路；
+        // 彻底卸载媒体源，下一次开启时重新创建高质量保活音频。
+        _keepAliveAudio.removeAttribute("src");
+        _keepAliveAudio.load();
+        _keepAliveAudio = null;
+    }
+    if (_keepAliveAudioUrl) {
+        URL.revokeObjectURL(_keepAliveAudioUrl);
+        _keepAliveAudioUrl = null;
     }
     document.removeEventListener("touchstart", onUserGesture, true);
     document.removeEventListener("click", onUserGesture, true);
