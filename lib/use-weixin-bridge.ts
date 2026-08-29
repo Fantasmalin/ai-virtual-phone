@@ -30,11 +30,47 @@ function broadcastStatus() {
 let _wakeLock: WakeLockSentinel | null = null;
 let _keepAliveAudio: HTMLAudioElement | null = null;
 let _keepAliveAudioUrl: string | null = null;
+let _keepAliveContext: AudioContext | null = null;
+let _keepAliveOscillator: OscillatorNode | null = null;
+let _keepAliveGain: GainNode | null = null;
 
 let _keepAliveWanted = false; // 标记：想要保活但还没获得用户手势
 let _suspendedForCall = false; // 标记：因语音/视频通话临时暂停了保活
 
+function getKeepAliveAudioContext(): AudioContext | null {
+    if (typeof window === "undefined") return null;
+    const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    if (!_keepAliveContext) {
+        try { _keepAliveContext = new AudioContextCtor(); } catch { return null; }
+    }
+    return _keepAliveContext;
+}
+
 function ensureAudioCreated() {
+    if (_keepAliveAudio || _keepAliveOscillator) return;
+
+    // Web Audio 不会被 Android 当作媒体元素展示在屏幕顶部，优先用它维持后台
+    // 音频豁免；仍保留 HTMLAudioElement 作为不支持 Web Audio 的设备回退。
+    const ctx = getKeepAliveAudioContext();
+    if (ctx) {
+        try {
+            const oscillator = ctx.createOscillator();
+            const gain = ctx.createGain();
+            oscillator.type = "sine";
+            oscillator.frequency.value = 20;
+            gain.gain.value = 0.00003;
+            oscillator.connect(gain);
+            gain.connect(ctx.destination);
+            _keepAliveOscillator = oscillator;
+            _keepAliveGain = gain;
+            return;
+        } catch {
+            _keepAliveOscillator = null;
+            _keepAliveGain = null;
+        }
+    }
+
     if (_keepAliveAudio) return;
     _keepAliveAudio = new Audio();
     // 生成 1 秒、48 kHz、16 bit、立体声静音 WAV。
@@ -81,7 +117,12 @@ function ensureAudioCreated() {
 
 /** 用户触摸时尝试播放（浏览器要求音频必须在用户手势中启动） */
 function onUserGesture() {
-    if (!_keepAliveWanted || !_keepAliveAudio) return;
+    if (!_keepAliveWanted) return;
+    const ctx = _keepAliveContext;
+    if (ctx && ctx.state === "suspended") {
+        void ctx.resume().catch(() => {});
+    }
+    if (!_keepAliveAudio) return;
     _keepAliveAudio.play().then(() => {
         // 成功了，移除监听
         document.removeEventListener("touchstart", onUserGesture, true);
@@ -103,7 +144,22 @@ async function startKeepAlive() {
     // 准备音频
     ensureAudioCreated();
 
-    // 先尝试直接播放（如果之前已有用户手势则可以成功）
+    const ctx = _keepAliveContext;
+    if (_keepAliveOscillator && ctx) {
+        if (ctx.state === "suspended") {
+            void ctx.resume().catch(() => {
+                document.addEventListener("touchstart", onUserGesture, { capture: true, once: false });
+                document.addEventListener("click", onUserGesture, { capture: true, once: false });
+            });
+        }
+        try {
+            if (_keepAliveOscillator.context.state === "suspended") void _keepAliveOscillator.context.resume();
+            _keepAliveOscillator.start();
+        } catch { /* 已启动时忽略 */ }
+        return;
+    }
+
+    // 不支持 Web Audio 时回退到循环媒体元素。
     _keepAliveAudio!.play().catch(() => {
         // 失败了：注册监听，等下一次用户触摸时播放
         document.addEventListener("touchstart", onUserGesture, { capture: true, once: false });
@@ -116,6 +172,17 @@ function stopKeepAlive() {
     _suspendedForCall = false;
     _wakeLock?.release().catch(() => {});
     _wakeLock = null;
+    if (_keepAliveOscillator) {
+        try { _keepAliveOscillator.stop(); } catch { /* ignore */ }
+        try { _keepAliveOscillator.disconnect(); } catch { /* ignore */ }
+        try { _keepAliveGain?.disconnect(); } catch { /* ignore */ }
+        _keepAliveOscillator = null;
+        _keepAliveGain = null;
+    }
+    if (_keepAliveContext) {
+        try { void _keepAliveContext.suspend(); } catch { /* ignore */ }
+        _keepAliveContext = null;
+    }
     if (_keepAliveAudio) {
         _keepAliveAudio.pause();
         _keepAliveAudio.currentTime = 0;
@@ -146,6 +213,9 @@ export function suspendKeepAliveForCall() {
     _wakeLock = null;
     if (_keepAliveAudio) {
         try { _keepAliveAudio.pause(); } catch {}
+    }
+    if (_keepAliveContext) {
+        try { void _keepAliveContext.suspend(); } catch {}
     }
     document.removeEventListener("touchstart", onUserGesture, true);
     document.removeEventListener("click", onUserGesture, true);

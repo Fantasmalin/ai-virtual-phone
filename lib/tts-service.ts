@@ -250,18 +250,24 @@ function getSharedAudio(): HTMLAudioElement {
 }
 
 function silentWavUrl(): string {
-    // A few ms of 8-bit mono PCM silence — a valid source so play() actually
-    // starts (and thus unlocks the element) on iOS.
-    const numSamples = 16;
-    const buffer = new ArrayBuffer(44 + numSamples);
+    // Use the same ordinary media format as the Android keep-alive fallback.
+    // Some Android WebViews retain the first audio route they initialize, so an
+    // 8 kHz unlock clip can make later TTS sound like narrow-band phone audio.
+    const sampleRate = 48000;
+    const channels = 2;
+    const bitsPerSample = 16;
+    const numFrames = 480;
+    const blockAlign = channels * bitsPerSample / 8;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = numFrames * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataSize);
     const view = new DataView(buffer);
     const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-    writeStr(0, "RIFF"); view.setUint32(4, 36 + numSamples, true); writeStr(8, "WAVE");
+    writeStr(0, "RIFF"); view.setUint32(4, 36 + dataSize, true); writeStr(8, "WAVE");
     writeStr(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true); view.setUint32(24, 8000, true); view.setUint32(28, 8000, true);
-    view.setUint16(32, 1, true); view.setUint16(34, 8, true);
-    writeStr(36, "data"); view.setUint32(40, numSamples, true);
-    for (let i = 0; i < numSamples; i++) view.setUint8(44 + i, 128); // 8-bit silence = 128
+    view.setUint16(22, channels, true); view.setUint32(24, sampleRate, true); view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true); view.setUint16(34, bitsPerSample, true);
+    writeStr(36, "data"); view.setUint32(40, dataSize, true);
     return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
 }
 
