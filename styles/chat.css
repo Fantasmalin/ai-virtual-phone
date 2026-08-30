@@ -7007,6 +7007,38 @@
   to { opacity: 1; }
 }
 
+/* ── 聊天语音下载按钮 ── */
+.voice-msg-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.voice-msg-download {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.voice-msg-download:active {
+  transform: scale(0.9);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+.voice-msg-download:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ── 台词 <q> 标签 ──
    消息渲染时会自动把引号内对话包进 <q>（见 message-bubble.tsx 的 wrapQuotedDialogue）。
    这里关掉浏览器默认附加的引号，保证默认无视觉变化；

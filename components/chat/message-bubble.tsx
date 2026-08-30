@@ -18,7 +18,7 @@ import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
-import { Blocks, Maximize2, ReceiptText } from "lucide-react";
+import { Blocks, Download, Maximize2, ReceiptText } from "lucide-react";
 import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
@@ -2228,9 +2228,33 @@ function synthesizeVoiceForMessage(msgId: string, characterId: string, speechTex
     return task;
 }
 
+function getVoiceDownloadExtension(src: string): string {
+    const mime = src.match(/^data:([^;,]+)/i)?.[1]?.toLowerCase() || "";
+    if (mime.includes("wav")) return ".wav";
+    if (mime.includes("ogg")) return ".ogg";
+    if (mime.includes("webm")) return ".webm";
+    if (mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac")) return ".m4a";
+    if (mime.includes("mpeg") || mime.includes("mp3")) return ".mp3";
+    return ".mp3";
+}
+
+function buildVoiceDownloadFilename(msg: ChatMessage, src: string): string {
+    const date = new Date(msg.createdAt || Date.now());
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const stamp = Number.isNaN(date.getTime())
+        ? String(Date.now())
+        : `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+    const sender = (msg.senderName || (msg.role === "user" ? "我" : "角色"))
+        .replace(/[\\/:*?"<>|]/g, "_")
+        .trim()
+        .slice(0, 40) || "角色";
+    return `${sender}-语音-${stamp}${getVoiceDownloadExtension(src)}`;
+}
+
 function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpanded = false }: { msg: ChatMessage; characterId?: string; onUpdate?: (m: ChatMessage) => void; defaultTranslationExpanded?: boolean }) {
     const [playing, setPlaying] = useState(false);
     const [synthesizing, setSynthesizing] = useState(false);
+    const [downloading, setDownloading] = useState(false);
     const [synthFailed, setSynthFailed] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const mountedRef = useRef(true);
@@ -2256,6 +2280,17 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
         audio.onended = finalize;
         audio.onerror = finalize;
         audio.play().catch(finalize);
+    };
+
+    // 点击才合成（不再挂载即合成）：已有音频直接播；没有就现场合成一次，
+    // 合成结果已在任务内落库，之后任何时候点都是直接播放，不再消耗额度。
+    const ensureVoiceSource = async (): Promise<string | null> => {
+        if (msg.mediaUrl && !needsResynthesis) return msg.mediaUrl;
+        if (msg.role === "user" || !characterId) return msg.mediaUrl || null;
+        setSynthFailed(false);
+        const dataUrl = await synthesizeVoiceForMessage(msg.id, characterId, speechText);
+        if (onUpdate) onUpdate({ ...msg, mediaUrl: dataUrl, mediaData: { ...msg.mediaData, synthesizedFromText: speechText } });
+        return dataUrl;
     };
 
     // 点击才合成（不再挂载即合成）：已有音频直接播；没有就现场合成一次，
@@ -2293,6 +2328,25 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
             });
     };
 
+    const handleDownload = async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (downloading || synthesizing) return;
+        setDownloading(true);
+        setSynthFailed(false);
+        try {
+            const src = await ensureVoiceSource();
+            if (!src) throw new Error("这条语音没有可保存的音频");
+            const { downloadUrl } = await import("@/lib/download-utils");
+            await downloadUrl(src, buildVoiceDownloadFilename(msg, src));
+        } catch (error) {
+            setSynthFailed(true);
+            console.error("Failed to download chat voice:", error);
+        } finally {
+            if (mountedRef.current) setDownloading(false);
+        }
+    };
+
     useEffect(() => () => { audioRef.current?.pause(); }, []);
 
     // Wave bars — slightly irregular heights so the idle state already looks intentional.
@@ -2328,6 +2382,21 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
                 ))}
             </div>
             <span className="voice-msg-dur">{synthFailed ? "合成失败·点击重试" : `${duration}"`}</span>
+            <button
+                type="button"
+                className="voice-msg-download"
+                aria-label={downloading ? "正在准备下载" : "下载语音"}
+                title={downloading ? "正在准备下载" : "下载语音"}
+                disabled={downloading || synthesizing}
+                onClick={handleDownload}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
+                {downloading ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" /></svg>
+                ) : (
+                    <Download size={14} strokeWidth={2} />
+                )}
+            </button>
         </div>
     );
 }
