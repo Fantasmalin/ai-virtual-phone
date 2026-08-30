@@ -309,6 +309,85 @@ export function archiveChapter(sessionId: string, chapterIndex: number): void {
   updateVnSession(sessionId, { chapters });
 }
 
+function numberToChineseChapter(n: number): string {
+  const digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  if (n < 10) return digits[n];
+  if (n === 10) return "十";
+  if (n < 20) return `十${digits[n - 10]}`;
+  if (n < 100) {
+    const tens = Math.floor(n / 10);
+    const ones = n % 10;
+    return `${digits[tens]}十${ones ? digits[ones] : ""}`;
+  }
+  return String(n);
+}
+
+/**
+ * Delete a chapter and all of its messages. Later chapters/messages are
+ * re-indexed so chapterIndex remains contiguous. The write is persisted in a
+ * single IndexedDB transaction, while the in-memory caches update immediately.
+ */
+export function deleteVnChapter(sessionId: string, chapterIndex: number): boolean {
+  const sessionIndex = _sessionsCache.findIndex((s) => s.id === sessionId);
+  if (sessionIndex === -1) return false;
+
+  const session = _sessionsCache[sessionIndex];
+  if (!session.chapters[chapterIndex]) return false;
+
+  const deletedMessageIds = _messagesCache
+    .filter((message) => message.sessionId === sessionId && message.chapterIndex === chapterIndex)
+    .map((message) => message.id);
+
+  _messagesCache = _messagesCache
+    .filter((message) => !(message.sessionId === sessionId && message.chapterIndex === chapterIndex))
+    .map((message) => (
+      message.sessionId === sessionId && message.chapterIndex > chapterIndex
+        ? { ...message, chapterIndex: message.chapterIndex - 1 }
+        : message
+    ));
+
+  const defaultTitlePattern = /^第[零一二三四五六七八九十百\d]+章$/;
+  const chapters = session.chapters
+    .filter((_, index) => index !== chapterIndex)
+    .map((chapter, index) => ({
+      ...chapter,
+      index,
+      title: defaultTitlePattern.test(chapter.title)
+        ? `第${numberToChineseChapter(index + 1)}章`
+        : chapter.title,
+    }));
+
+  let activeChapterIndex = session.activeChapterIndex;
+  if (activeChapterIndex === chapterIndex) activeChapterIndex = -1;
+  else if (activeChapterIndex > chapterIndex) activeChapterIndex -= 1;
+  if (activeChapterIndex >= chapters.length) activeChapterIndex = -1;
+
+  const remainingMessages = _messagesCache
+    .filter((message) => message.sessionId === sessionId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const lastMessage = remainingMessages[remainingMessages.length - 1];
+  const updatedAt = new Date().toISOString();
+  const nextSession: VnSession = {
+    ...session,
+    chapters,
+    activeChapterIndex,
+    updatedAt,
+    lastMessageId: lastMessage?.id,
+    lastMessagePreview: lastMessage
+      ? lastMessage.rawContent.replace(/\s+/g, " ").trim().slice(0, 64)
+      : undefined,
+  };
+  _sessionsCache[sessionIndex] = nextSession;
+
+  vnDb.transaction("rw", vnDb.sessions, vnDb.messages, async () => {
+    if (deletedMessageIds.length > 0) await vnDb.messages.bulkDelete(deletedMessageIds);
+    if (remainingMessages.length > 0) await vnDb.messages.bulkPut(remainingMessages);
+    await vnDb.sessions.put(nextSession);
+  }).catch(() => undefined);
+
+  return true;
+}
+
 export function updateChapterSummary(
   sessionId: string,
   chapterIndex: number,

@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Plus, BookOpen } from "lucide-react";
+import { ArrowLeft, Plus, BookOpen, Trash2 } from "lucide-react";
 import { loadCharacters } from "@/lib/character-storage";
 import {
   createOrGetVnSession,
   startNewChapter,
   updateChapterSummary,
   loadVnMessagesForChapter,
+  deleteVnChapter,
 } from "@/lib/vn-storage";
 import { summarizeVnChapter } from "@/lib/vn-engine";
 
@@ -29,6 +30,9 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
   const [mounted, setMounted] = useState(false);
   const [, forceUpdate] = useState(0);
   const [summarizing, setSummarizing] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
 
   const character = useMemo(() => {
     return loadCharacters().find((c) => c.id === characterId);
@@ -72,6 +76,41 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
       setSummarizing(null);
     }
   }, [session.id, characterId]);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearLongPress(), [clearLongPress]);
+
+  const beginLongPress = useCallback((chapterIndex: number) => {
+    clearLongPress();
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setDeleteTarget(chapterIndex);
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(35);
+    }, 650);
+  }, [clearLongPress]);
+
+  const handleChapterClick = useCallback((chapterIndex: number) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    onSelect(chapterIndex);
+  }, [onSelect]);
+
+  const handleDeleteChapter = useCallback(() => {
+    if (deleteTarget === null) return;
+    if (deleteVnChapter(session.id, deleteTarget)) {
+      setDeleteTarget(null);
+      forceUpdate((n) => n + 1);
+    }
+  }, [deleteTarget, session.id]);
 
   const nodeSpacing = 120;
   const totalHeight = (chapters.length + 1) * nodeSpacing + 200;
@@ -348,6 +387,54 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
           letter-spacing: 0.05em;
           margin-top: 2px;
         }
+        .vnc-delete-hint {
+          font-size: calc(9px*var(--app-text-scale,1));
+          color: var(--vn-ui-text-dim);
+          opacity: 0.45;
+          letter-spacing: 0.08em;
+          margin-top: 3px;
+        }
+
+        /* ── Delete confirmation ── */
+        .vnc-modal-backdrop {
+          position: absolute; inset: 0; z-index: 30;
+          display: flex; align-items: center; justify-content: center;
+          padding: 24px;
+          background: rgba(4, 4, 12, 0.72);
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+        }
+        .vnc-modal {
+          width: min(100%, 320px);
+          padding: 24px 20px 18px;
+          border: 1px solid var(--vn-ui-border);
+          border-radius: 18px;
+          background: var(--vn-bg);
+          box-shadow: 0 18px 60px rgba(0,0,0,0.45);
+          text-align: center;
+        }
+        .vnc-modal-icon {
+          width: 44px; height: 44px; margin: 0 auto 14px;
+          border-radius: 50%; display: flex; align-items: center; justify-content: center;
+          color: #f0a0a8; background: rgba(190,70,85,0.13);
+          border: 1px solid rgba(220,110,125,0.24);
+        }
+        .vnc-modal-title { color: var(--vn-ui-text-bright); font-size: calc(16px*var(--app-text-scale,1)); }
+        .vnc-modal-copy {
+          margin-top: 10px; color: var(--vn-ui-text-dim);
+          font-size: calc(12px*var(--app-text-scale,1)); line-height: 1.7;
+        }
+        .vnc-modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .vnc-modal-btn {
+          flex: 1; min-height: 42px; border-radius: 12px; cursor: pointer;
+          border: 1px solid var(--vn-ui-border); color: var(--vn-ui-text);
+          background: var(--vn-ui-input); font-family: inherit;
+        }
+        .vnc-modal-btn-danger {
+          color: #ffd9dd; border-color: rgba(220,110,125,0.35);
+          background: rgba(170,55,70,0.22);
+        }
+        .vnc-modal-btn:active { transform: scale(0.97); }
       `}</style>
 
       {/* ── Top Bar ── */}
@@ -384,7 +471,11 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
                 className="vnc-node"
                 data-archived={ch.archived ? "true" : undefined}
                 style={{ left: `${x}%`, top: y, opacity: mounted ? 1 : 0, transition: `all 0.5s ease ${i * 0.15}s` }}
-                onClick={() => onSelect(i)}
+                onClick={() => handleChapterClick(i)}
+                onPointerDown={() => beginLongPress(i)}
+                onPointerUp={clearLongPress}
+                onPointerCancel={clearLongPress}
+                onPointerLeave={clearLongPress}
               >
                 <div className="vnc-star">
                   <div className="vnc-star-flare" />
@@ -397,6 +488,7 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
                   <div className="vnc-chapter-title">{ch.title}</div>
                   {ch.subtitle && <div className="vnc-chapter-sub">{ch.subtitle}</div>}
                   {ch.summaryContent && <div className="vnc-summary-badge">已生成记忆</div>}
+                  <div className="vnc-delete-hint">长按删除</div>
                 </div>
                 {/* Summarize button for archived chapters without summary */}
                 {ch.archived && !ch.summaryContent && (
@@ -431,6 +523,22 @@ export function VnChapters({ characterId, onClose, onSelect, vnTheme }: VnChapte
           </button>
         </div>
       </div>
+
+      {deleteTarget !== null && chapters[deleteTarget] && (
+        <div className="vnc-modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="vnc-modal" role="dialog" aria-modal="true" aria-labelledby="vnc-delete-title" onClick={(e) => e.stopPropagation()}>
+            <div className="vnc-modal-icon"><Trash2 size={20} /></div>
+            <div className="vnc-modal-title" id="vnc-delete-title">删除{chapters[deleteTarget].title}？</div>
+            <div className="vnc-modal-copy">
+              本章的全部剧情、选项、配音与章节记忆都会永久删除，后续章节将自动向前顺延。此操作无法撤销。
+            </div>
+            <div className="vnc-modal-actions">
+              <button className="vnc-modal-btn" onClick={() => setDeleteTarget(null)}>取消</button>
+              <button className="vnc-modal-btn vnc-modal-btn-danger" onClick={handleDeleteChapter}>确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
