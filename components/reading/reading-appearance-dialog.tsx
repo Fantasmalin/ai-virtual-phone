@@ -8,8 +8,9 @@ import type { ReadingAppearance } from "@/lib/reading-appearance";
 import { DEFAULT_READING_APPEARANCE, READING_FONT_OPTIONS, resolveReadingFontFamily } from "@/lib/reading-appearance";
 
 const READING_COLORS = [
-    ["深苔绿", "#35482C"], ["橄榄绿", "#465338"], ["暖茶褐", "#51452F"],
-    ["深灰", "#363A40"], ["墨蓝", "#30465B"], ["奶油白（深底）", "#FFF8E7"],
+    ["橄榄绿", "#465338"], ["暖茶褐", "#51452F"],
+    ["深灰", "#363A40"], ["墨蓝", "#30465B"],
+    ["奶油白", "#FFF8E7"], ["柔灰", "#797E85"],
 ];
 function parseHex(value: string): string | null {
     const text = value.trim().replace(/^#/, "");
@@ -216,20 +217,20 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                             }} />
                     </label>
                     {colorError && <p role="alert" style={{ color: "#a13228", fontSize: 13 }}>{colorError}；预览保留上一个有效颜色。</p>}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
                         {READING_COLORS.map(([label, color]) => (
                             <button key={color} type="button" disabled={saving} aria-pressed={draft.textColor.toUpperCase() === color}
-                                onClick={() => chooseColor(color)} className="ui-btn ui-btn-outline" style={{ minHeight: 44, gap: 6 }}>
-                                <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: "50%", background: color, border: "1px solid #999" }} />{label}
+                                onClick={() => chooseColor(color)} className="ui-btn ui-btn-outline" style={{ width: "100%", minWidth: 0, minHeight: 44, padding: "10px 6px", gap: 6, whiteSpace: "nowrap", justifyContent: "center" }}>
+                                <span aria-hidden="true" style={{ width: 18, height: 18, flexShrink: 0, borderRadius: "50%", background: color, border: "1px solid #999" }} />{label}
                             </button>
                         ))}
                     </div>
                     {(draft.recentColors || []).length > 0 && <div>
                         <p>最近保存的颜色</p>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(8, minmax(0, 1fr))", gap: 4, width: "100%" }}>
                             {draft.recentColors!.map(color => <button key={color} type="button" disabled={saving}
                                 aria-label={`使用颜色 ${color}`} title={color} onClick={() => chooseColor(color)}
-                                style={{ width: 44, height: 44, borderRadius: 10, background: color, border: "2px solid #aaa" }} />)}
+                                style={{ width: "100%", minWidth: 0, height: "auto", aspectRatio: "1", padding: 0, borderRadius: 6, background: color, border: "1px solid #aaa" }} />)}
                         </div>
                     </div>}
                     <button type="button" className="ui-btn ui-btn-outline" disabled={saving} onClick={() => {
@@ -255,8 +256,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                         color: draft.textColor, fontFamily: previewFamily, fontSize: draft.fontSize, lineHeight: draft.lineHeight,
                     }} aria-label="阅读外观示例预览">
                         <strong>午后的书页</strong>
-                        <p style={{ margin: "12px 0", textIndent: "2em" }}>阳光落在窗边，小青蛙躲进一片绿叶的阴影里。翻开书，今天的故事才刚刚开始。</p>
-                        <p style={{ margin: "12px 0", textIndent: "2em" }}>慢慢读下去，让文字清晰，也让喜欢的壁纸陪在身边。</p>
+                        <p style={{ margin: "12px 0", textIndent: "2em", color: "inherit", fontSize: "inherit", lineHeight: "inherit", fontFamily: "inherit" }}>阳光落在窗边，小青蛙躲进一片绿叶的阴影里。翻开书，今天的故事才刚刚开始。</p>
+                        <p style={{ margin: "12px 0", textIndent: "2em", color: "inherit", fontSize: "inherit", lineHeight: "inherit", fontFamily: "inherit" }}>慢慢读下去，让文字清晰，也让喜欢的壁纸陪在身边。</p>
                     </div>
                     <p className="reading-settings-inline-note">示例随设置实时变化；预览区域与全屏比例不同，请保存后再检查文字压在图案上的效果。</p>
                     <div className="reading-settings-actions">
