@@ -81,7 +81,6 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
     }, [customFontFile]);
 
     const hasPreview = useMemo(() => Boolean(previewUrl) && !clearBackground, [previewUrl, clearBackground]);
-    const fade = draft.backgroundFade ?? 0;
     const previewFamily = draft.fontFamily === "custom"
         ? (previewFont || (clearCustomFont ? "var(--app-font-family)" : "var(--reading-font-family, var(--app-font-family))"))
         : resolveReadingFontFamily(draft.fontFamily);
@@ -235,9 +234,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                     </div>}
                     <button type="button" className="ui-btn ui-btn-outline" disabled={saving} onClick={() => {
                         chooseColor(DEFAULT_READING_APPEARANCE.textColor);
-                        setDraft(prev => ({ ...prev, textColor: DEFAULT_READING_APPEARANCE.textColor, backgroundFade: 0 }));
                     }}>恢复默认配色</button>
-                    <p className="reading-settings-inline-note">仅恢复正文颜色和淡化程度，不清除壁纸、字体或最近颜色。点击保存后生效。</p>
+                    <p className="reading-settings-inline-note">仅恢复正文颜色，不清除壁纸、字体或最近颜色。点击保存后生效。</p>
                 </section>
 
                 <section className="reading-settings-group">
@@ -245,14 +243,11 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                         <Palette size={15} />
                         <span>全屏背景</span>
                     </div>
-                    <Slider label="阅读页壁纸淡化" min={0} max={1} step={0.05} value={fade}
-                        displayValue={`${Math.round(fade * 100)}%`}
-                        onChange={e => setDraft(prev => ({ ...prev, backgroundFade: Number(e.target.value) }))} />
-                    <p className="reading-settings-inline-note">叠加奶油色底，书架不淡化。正文改色适用于 TXT / EPUB，不改变 PDF 原文颜色。</p>
+                    <p className="reading-settings-inline-note">书架和阅读页共用原壁纸。正文改色适用于 TXT / EPUB，不改变 PDF 原文颜色。</p>
                     <div style={{
                         borderRadius: 16, overflow: "hidden", padding: 20, maxHeight: 360, overflowY: "auto",
                         backgroundColor: "#fffced", backgroundSize: "cover", backgroundPosition: "center",
-                        backgroundImage: `linear-gradient(rgba(255,252,237,${fade}),rgba(255,252,237,${fade})), ${hasPreview ? `url("${previewUrl}")` : "none"}`,
+                        backgroundImage: hasPreview ? `url("${previewUrl}")` : "none",
                         color: draft.textColor, fontFamily: previewFamily, fontSize: draft.fontSize, lineHeight: draft.lineHeight,
                     }} aria-label="阅读外观示例预览">
                         <strong>午后的书页</strong>
