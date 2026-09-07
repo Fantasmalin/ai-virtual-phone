@@ -11,6 +11,8 @@ export type ReadingAppearance = {
     textColor: string;
     lineHeight: number;
     customFontName?: string;
+    backgroundFade?: number;
+    recentColors?: string[];
 };
 
 export const READING_FONT_OPTIONS: Array<{ id: ReadingFontFamilyId; label: string; cssValue: string }> = [
@@ -56,7 +58,12 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         ? raw.customFontName.trim()
         : undefined;
 
-    return { fontFamily, fontSize, textColor, lineHeight, customFontName };
+    const fade = Number(raw?.backgroundFade ?? 0);
+    const backgroundFade = Number.isFinite(fade) ? clamp(fade, 0, 1) : 0;
+    const recentColors = Array.isArray(raw?.recentColors)
+        ? [...new Set(raw.recentColors.filter((c): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)).map(c => c.toUpperCase()))].slice(0, 8)
+        : [];
+    return { fontFamily, fontSize, textColor, lineHeight, customFontName, backgroundFade, recentColors };
 }
 
 export function resolveReadingFontFamily(fontFamily: ReadingFontFamilyId, customFontFamily?: string): string {

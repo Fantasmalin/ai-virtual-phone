@@ -80,16 +80,10 @@ export default function ReadingApp({ onClose }: Props) {
         nextAppearance: ReadingAppearance,
         options: { backgroundFile: File | null; clearBackground: boolean; customFontFile: File | null; clearCustomFont: boolean },
     ) => {
-        const normalized = saveReadingAppearance(nextAppearance);
-        setAppearance(normalized);
-
         if (options.clearBackground) {
             await saveReadingBackground(null);
             updateBackgroundUrl(null);
-            return;
-        }
-
-        if (options.backgroundFile) {
+        } else if (options.backgroundFile) {
             await saveReadingBackground(options.backgroundFile);
             updateBackgroundUrl(URL.createObjectURL(options.backgroundFile));
         }
@@ -97,19 +91,19 @@ export default function ReadingApp({ onClose }: Props) {
         if (options.clearCustomFont) {
             await saveReadingCustomFont(null);
             await loadCustomFontFace(null);
-            return;
-        }
-
-        if (options.customFontFile) {
+        } else if (options.customFontFile) {
             await saveReadingCustomFont(options.customFontFile);
             await loadCustomFontFace(options.customFontFile);
         }
+        const normalized = saveReadingAppearance(nextAppearance);
+        setAppearance(normalized);
     };
 
     const appearanceStyle = {
         ["--reading-font-family" as "--reading-font-family"]: resolveReadingFontFamily(appearance.fontFamily, customFontFamily),
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
         ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
+        ["--reading-fade" as string]: appearance.backgroundFade ?? 0,
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
         ["--reading-bg-image" as "--reading-bg-image"]: backgroundUrl ? `url("${backgroundUrl}")` : "none",
     } as CSSProperties;
